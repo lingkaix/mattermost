@@ -15,12 +15,20 @@ import (
 	"github.com/mattermost/mattermost/server/public/shared/i18n"
 	"github.com/mattermost/mattermost/server/public/shared/mlog"
 	"github.com/mattermost/mattermost/server/v8/channels/app"
+	"github.com/mattermost/mattermost/server/v8/channels/app/request"
 	"github.com/mattermost/mattermost/server/v8/channels/audit"
 	"github.com/mattermost/mattermost/server/v8/channels/utils"
 	"github.com/mattermost/mattermost/server/v8/channels/utils/fileutils"
 )
 
 func (w *Web) InitOAuth() {
+	// ******************** 🌸 START 🌸 ******************** //
+	// login via mm_id and return session token
+	w.MainRouter.Handle("/gjauth/complete", w.APIHandler(completeGJAuth)).Methods("GET")
+	// register an new user
+	w.MainRouter.Handle("/gjauth/complete", w.APIHandler(newGJAuth)).Methods("POST")
+	// ******************** 🌸 END 🌸 ******************** //
+
 	// API version independent OAuth 2.0 as a service provider endpoints
 	w.MainRouter.Handle("/oauth/authorize", w.APIHandlerTrustRequester(authorizeOAuthPage)).Methods("GET")
 	w.MainRouter.Handle("/oauth/authorize", w.APISessionRequired(authorizeOAuthApp)).Methods("POST")
@@ -39,6 +47,46 @@ func (w *Web) InitOAuth() {
 	w.MainRouter.Handle("/login/{service:[A-Za-z0-9]+}/complete", w.APIHandler(completeOAuth)).Methods("GET")
 	w.MainRouter.Handle("/api/v4/oauth_test", w.APISessionRequired(testHandler)).Methods("GET")
 }
+
+// ******************** 🌸 START 🌸 ******************** //
+func completeGJAuth(c *Context, w http.ResponseWriter, r *http.Request) {
+	id := r.URL.Query().Get("mmid")
+	user := &model.User{}
+	user.Id = id
+	err := c.App.DoLogin(c.AppContext, w, r, user, "", false, false, false)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte("err: " + err.Error()))
+		return
+	}
+	w.Write([]byte("mm_token: " + c.AppContext.Session().Token))
+	return
+}
+
+func newGJAuth(c *Context, w http.ResponseWriter, r *http.Request) {
+	var user *model.User
+	if err := json.NewDecoder(r.Body).Decode(&user); err != nil || user == nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte("err: " + err.Error()))
+		return
+	}
+	user.SanitizeInput(false)
+	var ruser *model.User
+	var err *model.AppError
+	ruser, err = c.App.CreateUser(request.CTX(c.AppContext), user)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte("err: " + err.Error()))
+		return
+	}
+	if err := json.NewEncoder(w).Encode(ruser); err != nil {
+		w.Write([]byte("err: " + err.Error()))
+	}
+	w.WriteHeader(http.StatusCreated)
+	return
+}
+
+// ******************** 🌸 END 🌸 ******************** //
 
 func testHandler(c *Context, w http.ResponseWriter, r *http.Request) {
 	ReturnStatusOK(w)
